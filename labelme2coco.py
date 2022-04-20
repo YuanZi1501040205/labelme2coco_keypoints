@@ -2,31 +2,48 @@ import os
 import json
 import numpy as np
 import glob
-import shutil
-from tqdm import tqdm
-from labelme import utils
 from sklearn.model_selection import train_test_split
+import mediapipe as mp
+import cv2
 
 np.random.seed(41)
 
 classname_to_id = {"person": 1}
-labels = ["nose",  # 1
-          "left_eye",  # 2
-          "right_eye",  # 3
-          "left_ear",  # 4
-          "right_ear",  # 5
-          "left_shoulder",  # 6
-          "right_shoulder",  # 7
-          "left_elbow",  # 8
-          "right_elbow",  # 9
-          "left_wrist",  # 10
-          "right_wrist",  # 11
-          "left_hip",  # 12
-          "right_hip",  # 13
-          "left_knee",  # 14
-          "right_knee",  # 15
-          "left_ankle",  # 16
-          "right_ankle"]  # 17
+labels = ["LANK",  # 0 left ankle - upper
+          "LWRA",  # 1 left wrist marker a - upper
+          "LUPA",  # 2 left upper arm - upper
+          "RTIB",  # 3 right tibia - lower
+          "CLAV",  # 4 clavicle - upper
+          "LTHI",  # 5 left thigh - lower
+          "RHEE",  # 6 right heel - lower
+          "RELB",  # 7 right elbow - upper
+          "LFIN",  # 8 left finger - upper
+          "LKNE",  # 9 left knee - lower
+          "RWRA",  # 10 right wrist marker a - upper
+          "RWRB",  # 11 right wrist marker b - upper
+          "C7",  # 12 7th cervical vertebra - upper
+          "LSHO",  # 13 left shoulder - upper
+          "RFIN",  # 14 right finger - upper
+          "RPSI",  # 15 right posterior superior iliac - lower
+          "LTIB",  # 16 left tibia - lower
+          "RASI",  # 17 right anterior superior iliac - lower
+          "LELB",  # 18 left elbow - upper
+          "RTOE",  # 19 right toe - lower
+          "RBAK",  # 20 right back - upper
+          "T10",  # 21 10th thoracic vertebra - upper
+          "RFRM",  # 22 right forearm - upper
+          "LHEE",  # 23 left heel - lower
+          "LPSI",  # 24 left posterior superior iliac - lower
+          "LASI",  # 25 left anterior superior iliac - lower
+          "RKNE",  # 26 right knee - lower
+          "RUPA",  # 27 right upper arm - upper
+          "RANK",  # 28 right ankle - lower
+          "LTOE",  # 29 left toe - lower
+          "RTHI",  # 30 right thigh - lower
+          "STRN",  # 31 sternum - upper
+          "LWRB",  # 32 left wrist marker b - upper
+          "LFRM",  # 33 left forearm - upper
+          "RSHO"]  # 34 right shoulder - upper
 
 
 class Lableme2CoCo:
@@ -43,12 +60,12 @@ class Lableme2CoCo:
     def to_coco(self, json_path_list):
         self._init_categories()
         instance = {}
-        instance['info'] = {'description': 'Pose Estimation Dataset',
+        instance['info'] = {'description': 'AIK Pose Estimation Dataset',
                             'version': 1.0,
-                            'year': 2021,
-                            'contributer': "conex",
-                            'date_created': "2021/02/08"}
-        instance['license'] = ['Conex']
+                            'year': 2022,
+                            'contributor': "yuan zi",
+                            'date_created': "2022/04/17"}
+        instance['license'] = ['yuan zi']
         instance['images'] = self.images
         instance['categories'] = self.categories
 
@@ -73,20 +90,22 @@ class Lableme2CoCo:
                 print("Person", person + 1, "...")
                 # start with person = 0, create annotation dict for each person
                 person_annotation = []
-                keypoints = [None] * 18
+                keypoints = [None] * 35
 
+                part_index = 0
                 for shape in shapes:
                     # iterate through keypoints, add to dict if belongs to person
-                    if shape['group_id'] != person and isIndividual == False:
-                        continue
+                    # if shape['group_id'] != person and isIndividual == False:
+                    #     continue
                     # get the body part this keypoint represents
-                    part_index = int(shape['label'])
+
                     # store the keypoint data to keypoints[] at its respective index
                     keypoints[part_index] = shape['points'][0]
+                    part_index = part_index + 1
 
                 # edit the keypoint data to fit COCO annotation format
                 num_keypoints = 0
-                for keypoint_i in range(1, 18):
+                for keypoint_i in range(35):
                     # store keypoint for person in annotation
                     if keypoints[keypoint_i] == None:
                         person_annotation.extend([0, 0, 0])
@@ -102,8 +121,38 @@ class Lableme2CoCo:
                 annotation['iscrowd'] = 0
                 annotation['num_keypoints'] = num_keypoints
                 annotation['keypoints'] = person_annotation
+
+                # detect bbx by using mediapipe and use it as label
+                mp_pose = mp.solutions.pose
+                # For static images:
+                with mp_pose.Pose(static_image_mode=True,
+                                  model_complexity=1,
+                                  enable_segmentation=True,
+                                  min_detection_confidence=0.5) as pose:
+
+                    image = cv2.imread(json_path.split('.json')[0] + '.' + obj['imagePath'].split('.')[-1])
+
+                    image_height, image_width, _ = image.shape
+                    # Convert the BGR image to RGB before processing.
+                    results = pose.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+                    # mask_img = np.stack((results.segmentation_mask,) * 3, axis=-1) > 0.1
+                    mask_img = np.array(results.segmentation_mask, dtype=np.uint8) * 255
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (100, 100))  # 定义矩形结构元素
+
+                    mask_img = cv2.morphologyEx(mask_img, cv2.MORPH_CLOSE, kernel, iterations=1)  # 闭运算1
+
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (10, 10))  # 定义矩形结构元素
+                    mask_img = cv2.dilate(mask_img, kernel, iterations=3)
+                    thresh = cv2.Canny(mask_img, 128, 256)
+                    contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    cv2.drawContours(image, contours, -1, (0, 0, 255), 3)
+                    x, y, w, h = cv2.boundingRect(contours[0])
+
+                annotation['bbox'] = [x, y, w, h ]
+
                 # add person annotation to image annotation
-                print("Annotated data: ", annotation)
+                # print("Annotated data: ", annotation)
+                annotation['area'] = w*h
                 self.annotations.append(annotation)
                 self.ann_id += 1
 
@@ -120,52 +169,72 @@ class Lableme2CoCo:
             category['supercategory'] = k
             category['id'] = v
             category['name'] = k
-            category['keypoints'] = ["nose",
-                                     "left_eye",
-                                     "right_eye",
-                                     "left_ear",
-                                     "right_ear",
-                                     "left_shoulder",
-                                     "right_shoulder",
-                                     "left_elbow",
-                                     "right_elbow",
-                                     "left_wrist",
-                                     "right_wrist",
-                                     "left_hip",
-                                     "right_hip",
-                                     "left_knee",
-                                     "right_knee",
-                                     "left_ankle",
-                                     "right_ankle"]
+            category['keypoints'] = ["LANK",  # 0 left ankle - upper
+                                     "LWRA",  # 1 left wrist marker a - upper
+                                     "LUPA",  # 2 left upper arm - upper
+                                     "RTIB",  # 3 right tibia - lower
+                                     "CLAV",  # 4 clavicle - upper
+                                     "LTHI",  # 5 left thigh - lower
+                                     "RHEE",  # 6 right heel - lower
+                                     "RELB",  # 7 right elbow - upper
+                                     "LFIN",  # 8 left finger - upper
+                                     "LKNE",  # 9 left knee - lower
+                                     "RWRA",  # 10 right wrist marker a - upper
+                                     "RWRB",  # 11 right wrist marker b - upper
+                                     "C7",  # 12 7th cervical vertebra - upper
+                                     "LSHO",  # 13 left shoulder - upper
+                                     "RFIN",  # 14 right finger - upper
+                                     "RPSI",  # 15 right posterior superior iliac - lower
+                                     "LTIB",  # 16 left tibia - lower
+                                     "RASI",  # 17 right anterior superior iliac - lower
+                                     "LELB",  # 18 left elbow - upper
+                                     "RTOE",  # 19 right toe - lower
+                                     "RBAK",  # 20 right back - upper
+                                     "T10",  # 21 10th thoracic vertebra - upper
+                                     "RFRM",  # 22 right forearm - upper
+                                     "LHEE",  # 23 left heel - lower
+                                     "LPSI",  # 24 left posterior superior iliac - lower
+                                     "LASI",  # 25 left anterior superior iliac - lower
+                                     "RKNE",  # 26 right knee - lower
+                                     "RUPA",  # 27 right upper arm - upper
+                                     "RANK",  # 28 right ankle - lower
+                                     "LTOE",  # 29 left toe - lower
+                                     "RTHI",  # 30 right thigh - lower
+                                     "STRN",  # 31 sternum - upper
+                                     "LWRB",  # 32 left wrist marker b - upper
+                                     "LFRM",  # 33 left forearm - upper
+                                     "RSHO"]  # 34 right shoulder - upper
 
-            category['skeleton'] = [
-                [16, 14],
-                [14, 12],
-                [17, 15],
-                [15, 13],
-                [12, 13],
-                [6, 12],
-                [7, 13],
-                [6, 7],
-                [6, 8],
-                [7, 9],
-                [8, 10],
-                [9, 11],
-                [2, 3],
-                [1, 2],
-                [1, 3],
-                [2, 4],
-                [3, 5],
-                [4, 6],
-                [5, 7]
-            ]
+            # category['skeleton'] = [
+            #     [16, 14],
+            #     [14, 12],
+            #     [17, 15],
+            #     [15, 13],
+            #     [12, 13],
+            #     [6, 12],
+            #     [7, 13],
+            #     [6, 7],
+            #     [6, 8],
+            #     [7, 9],
+            #     [8, 10],
+            #     [9, 11],
+            #     [2, 3],
+            #     [1, 2],
+            #     [1, 3],
+            #     [2, 4],
+            #     [3, 5],
+            #     [4, 6],
+            #     [5, 7]
+            # ]
             self.categories.append(category)
 
     def _image(self, obj, path):
         image = {}
-        img_x = utils.img_b64_to_arr(obj['imageData'])
-        image["height"] = img_x.shape[0]
-        image["width"] = img_x.shape[1]
+        # img_x = utils.img_b64_to_arr(obj['imageData'])
+        # image["height"] = img_x.shape[0]
+        # image["width"] = img_x.shape[1]
+        image["height"] = obj['imageHeight']
+        image["width"] = obj['imageWidth']
         image['id'] = self.img_id
         image['file_name'] = os.path.basename(path).replace(".json", ".jpg")
         return image
@@ -182,19 +251,20 @@ if __name__ == '__main__':
     val = Lableme2CoCo()
 
     # name of the folders containing labelme format json files
-    folders = ["CMN", "CSB", "CSN", "CMB",
-               "SMN", "SSB", "SSN", "SMB"]
+    folders = [
+        "/home/yzi/PycharmProjects/human_pose/data/annotation_dataset/AIK_dataset_aik10_normal/content/AIK_dataset_labelme"]
+    save_folder = '/home/yzi/PycharmProjects/human_pose/data/annotation_dataset/AIK_dataset_aik10_normal/content/AIK_dataset_coco/annotation'
 
     # loop through the directories and start converting
     for folder in folders:
         print("Saving in ", folder)
 
         # set the paths
-        json_path = os.path.join("./annotated/" + folder)  # path to labelme json folder
+        json_path = os.path.join(folder)  # path to labelme json folder
         json_list_path = glob.glob(json_path + "/*.json")  # labelme json files in folder
         train_path, val_path = train_test_split(json_list_path, test_size=0.2)  # split to train and test data set
-        train_save_path = "./converted/base_dataset/train/train_" + folder + ".json"  # path to save COCO json files (train)
-        val_save_path = "./converted/base_dataset/val/val_" + folder + ".json"  # path to save COCO json files (validation)
+        train_save_path = save_folder + "/train_AIK_10_normal.json"  # path to save COCO json files (train)
+        val_save_path = save_folder + "/val_AIK_10_normal.json"  # path to save COCO json files (validation)
 
         # convert to COCO format
         train_instance = train.to_coco(train_path)
@@ -203,4 +273,3 @@ if __name__ == '__main__':
         # save the converted COCO json files
         json.dump(train_instance, open(train_save_path, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
         json.dump(val_instance, open(val_save_path, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
-
