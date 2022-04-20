@@ -1,5 +1,5 @@
 # labelme2coco_keypoints
-Convert labelme format keypoints .json to MSCOCO format keypoints for human detection  
+Convert labelme format keypoints .json to MSCOCO format keypoints for customized human keypoints detection training-mmpose  
 
 Install labelme before running the script.  
 Installation Steps For Windows:  
